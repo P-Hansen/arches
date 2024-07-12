@@ -837,32 +837,25 @@ class EDTFDataType(BaseDataType):
 
 
 class GeojsonFeatureCollectionDataType(BaseDataType):
-    def validate(self, value, row_number=None, source=None, node=None, nodeid=None, strict=False, **kwargs):
-        errors = []
-        coord_limit = 1500
-        coordinate_count = 0
+    def __init__(self, model=None):
+        super(GeojsonFeatureCollectionDataType, self).__init__(model=model)
+        self.geo_utils = GeoUtils()
 
-        def validate_geom(geom, coordinate_count=0):
+    def validate(
+        self,
+        value,
+        row_number=None,
+        source=None,
+        node=None,
+        nodeid=None,
+        strict=False,
+        **kwargs,
+    ):
+        errors = []
+
+        def validate_geom_bbox(geom):
             try:
-                coordinate_count += geom.num_coords
                 bbox = Polygon(settings.DATA_VALIDATION_BBOX)
-                if coordinate_count > coord_limit:
-                    message = _(
-                        "Geometry has too many coordinates for Elasticsearch ({0}), \
-                        Please limit to less then {1} coordinates of 5 digits of precision or less.".format(
-                            coordinate_count, coord_limit
-                        )
-                    )
-                    title = _("Geometry Too Many Coordinates for ES")
-                    errors.append(
-                        {
-                            "type": "ERROR",
-                            "message": "datatype: {0} value: {1} {2} - {3}. {4}".format(
-                                self.datatype_model.datatype, value, source, message, "This data was not imported."
-                            ),
-                            "title": title,
-                        }
-                    )
 
                 if bbox.contains(geom) == False:
                     message = _(
@@ -874,7 +867,11 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
                         {
                             "type": "ERROR",
                             "message": "datatype: {0} value: {1} {2} - {3}. {4}".format(
-                                self.datatype_model.datatype, value, source, message, "This data was not imported."
+                                self.datatype_model.datatype,
+                                value,
+                                source,
+                                message,
+                                "This data was not imported.",
                             ),
                             "title": title,
                         }
@@ -886,7 +883,11 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
                     {
                         "type": "ERROR",
                         "message": "datatype: {0} value: {1} {2} - {3}. {4}.".format(
-                            self.datatype_model.datatype, value, source, message, "This data was not imported."
+                            self.datatype_model.datatype,
+                            value,
+                            source,
+                            message,
+                            "This data was not imported.",
                         ),
                         "title": title,
                     }
@@ -896,11 +897,16 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
             for feature in value["features"]:
                 try:
                     geom = GEOSGeometry(JSONSerializer().serialize(feature["geometry"]))
-                    validate_geom(geom, coordinate_count)
+                    if geom.valid:
+                        validate_geom_bbox(geom)
+                    else:
+                        raise Exception
                 except Exception:
-                    message = _("Unable to serialize some geometry features")
+                    message = _("Unable to serialize some geometry features.")
                     title = _("Unable to Serialize Geometry")
-                    error_message = self.create_error_message(value, source, row_number, message, title)
+                    error_message = self.create_error_message(
+                        value, source, row_number, message, title
+                    )
                     errors.append(error_message)
         return errors
 
@@ -916,7 +922,7 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
 
     def transform_value_for_tile(self, value, **kwargs):
         if "format" in kwargs and kwargs["format"] == "esrijson":
-            arches_geojson = GeoUtils().arcgisjson_to_geojson(value)
+            arches_geojson = self.geo_utils.arcgisjson_to_geojson(value)
         else:
             try:
                 geojson = json.loads(value)
@@ -927,22 +933,20 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
                 else:
                     raise TypeError
             except (json.JSONDecodeError, KeyError, TypeError):
-                arches_geojson = {}
-                arches_geojson["type"] = "FeatureCollection"
-                arches_geojson["features"] = []
                 try:
                     geometry = GEOSGeometry(value, srid=4326)
                     if geometry.geom_type == "GeometryCollection":
-                        for geom in geometry:
-                            arches_json_geometry = {}
-                            arches_json_geometry["geometry"] = JSONDeserializer().deserialize(GEOSGeometry(geom, srid=4326).json)
-                            arches_json_geometry["type"] = "Feature"
-                            arches_json_geometry["id"] = str(uuid.uuid4())
-                            arches_json_geometry["properties"] = {}
-                            arches_geojson["features"].append(arches_json_geometry)
+                        arches_geojson = self.geo_utils.convert_geos_geom_collection_to_feature_collection(
+                            geometry
+                        )
                     else:
+                        arches_geojson = {}
+                        arches_geojson["type"] = "FeatureCollection"
+                        arches_geojson["features"] = []
                         arches_json_geometry = {}
-                        arches_json_geometry["geometry"] = JSONDeserializer().deserialize(geometry.json)
+                        arches_json_geometry["geometry"] = (
+                            JSONDeserializer().deserialize(geometry.json)
+                        )
                         arches_json_geometry["type"] = "Feature"
                         arches_json_geometry["id"] = str(uuid.uuid4())
                         arches_json_geometry["properties"] = {}
@@ -965,16 +969,84 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
         updated_data = tile.data[nodeid]
         return updated_data
 
+    def find_num(self, current_item):
+        if len(current_item) and isinstance(current_item[0], float):
+            return decimal.Decimal(str(current_item[0])).as_tuple().exponent
+        else:
+            return self.find_num(current_item[0])
+
+    def _feature_length_in_bytes(self, feature):
+        return len(str(feature).encode("UTF-8"))
+
     def append_to_document(self, document, nodevalue, nodeid, tile, provisional=False):
-        document["geometries"].append({"geom": nodevalue, "nodegroup_id": tile.nodegroup_id, "provisional": provisional, "tileid": tile.pk})
+        max_length = (
+            32000  # this was 32766, but do we need space for extra part of JSON?
+        )
+
+        features = []
+        nodevalue["properties"] = {}
+        if self._feature_length_in_bytes(nodevalue) < max_length:
+            features.append(nodevalue)
+        else:
+            for feature in nodevalue["features"]:
+                new_feature = {"type": "FeatureCollection", "features": [feature]}
+                if self._feature_length_in_bytes(new_feature) < max_length:
+                    features.append(new_feature)
+                else:
+                    chunks = self.split_geom(feature, max_length)
+                    features = features + chunks
+
+        for feature in features:
+            document["geometries"].append(
+                {
+                    "geom": feature,
+                    "nodegroup_id": tile.nodegroup_id,
+                    "provisional": provisional,
+                    "tileid": tile.pk,
+                }
+            )
         bounds = self.get_bounds_from_value(nodevalue)
         if bounds is not None:
             minx, miny, maxx, maxy = bounds
             centerx = maxx - (maxx - minx) / 2
             centery = maxy - (maxy - miny) / 2
             document["points"].append(
-                {"point": {"lon": centerx, "lat": centery}, "nodegroup_id": tile.nodegroup_id, "provisional": provisional}
+                {
+                    "point": {"lon": centerx, "lat": centery},
+                    "nodegroup_id": tile.nodegroup_id,
+                    "provisional": provisional,
+                }
             )
+
+    def split_geom(self, feature, max_feature_in_bytes=32766):
+        geom = feature["geometry"]
+        coordinates = (
+            geom["coordinates"]
+            if geom["type"] == "LineString"
+            else geom["coordinates"][0]
+            )
+        num_points = len(coordinates)
+        num_chunks = self._feature_length_in_bytes(feature) / max_feature_in_bytes
+        max_points = int(num_points / num_chunks)
+
+        with connection.cursor() as cur:
+            cur.execute(
+                "select st_asgeojson(st_subdivide(ST_GeomFromGeoJSON(%s::jsonb), %s))",
+                [JSONSerializer().serialize(feature["geometry"]), max_points],
+            )
+            smaller_chunks = [
+                {
+                    "id": feature["id"],
+                    "type": "Feature",
+                    "geometry": json.loads(item[0]),
+                }
+                for item in cur.fetchall()
+            ]
+            feature_collections = [
+                {"type": "FeatureCollection", "features": [geometry]}
+                for geometry in smaller_chunks
+            ]
+            return feature_collections
 
     def get_bounds(self, tile, node):
         bounds = None
@@ -988,7 +1060,9 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
     def get_bounds_from_value(self, node_data):
         bounds = None
         for feature in node_data["features"]:
-            geom_collection = GEOSGeometry(JSONSerializer().serialize(feature["geometry"]))
+            geom_collection = GEOSGeometry(
+                JSONSerializer().serialize(feature["geometry"])
+            )
 
             if bounds is None:
                 bounds = geom_collection.extent
@@ -1012,7 +1086,9 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
             return None
         elif node.config is None:
             return None
-        tile_exists = models.TileModel.objects.filter(nodegroup_id=node.nodegroup_id, data__has_key=str(node.nodeid)).exists()
+        tile_exists = models.TileModel.objects.filter(
+            nodegroup_id=node.nodegroup_id, data__has_key=str(node.nodeid)
+        ).exists()
         if not preview and (not tile_exists or not node.config["layerActivated"]):
             return None
 
@@ -1429,7 +1505,12 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
             "properties": {
                 "features": {
                     "properties": {
-                        "geometry": {"properties": {"coordinates": {"type": "float"}, "type": {"type": "keyword"}}},
+                        "geometry": {
+                            "properties": {
+                                "coordinates": {"type": "float"},
+                                "type": {"type": "keyword"},
+                            }
+                        },
                         "id": {"type": "keyword"},
                         "type": {"type": "keyword"},
                         "properties": {"type": "object"},
@@ -1452,7 +1533,13 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
                 for f in data["features"]:
                     del f["id"]
                     del f["properties"]
-            g.add((edge_info["d_uri"], URIRef(edge.ontologyproperty), Literal(JSONSerializer().serialize(data))))
+            g.add(
+                (
+                    edge_info["d_uri"],
+                    URIRef(edge.ontologyproperty),
+                    Literal(JSONSerializer().serialize(data)),
+                )
+            )
         return g
 
     def from_rdf(self, json_ld_node):
@@ -1460,7 +1547,9 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
         try:
             val = json.loads(json_ld_node["@value"])
         except:
-            raise ValueError(f"Bad Data in GeoJSON, should be JSON string: {json_ld_node}")
+            raise ValueError(
+                f"Bad Data in GeoJSON, should be JSON string: {json_ld_node}"
+            )
         if "features" not in val or type(val["features"]) != list:
             raise ValueError(f"GeoJSON must have features array")
         for f in val["features"]:
@@ -1485,10 +1574,23 @@ class FileListDataType(BaseDataType):
         validator = FileValidator()
         files = request.FILES.getlist("file-list_" + nodeid, [])
         for file in files:
-            errors = errors + validator.validate_file_type(file.file, file.name.split(".")[-1])
+            errors = errors + validator.validate_file_type(
+                file.file, file.name.split(".")[-1]
+            )
         return errors
 
-    def validate(self, value, row_number=None, source=None, node=None, nodeid=None, strict=False, path=None, request=None, **kwargs):
+    def validate(
+        self,
+        value,
+        row_number=None,
+        source=None,
+        node=None,
+        nodeid=None,
+        strict=False,
+        path=None,
+        request=None,
+        **kwargs,
+    ):
         errors = []
         file_type_errors = []
         if request:
@@ -1496,7 +1598,13 @@ class FileListDataType(BaseDataType):
 
         if len(file_type_errors) > 0:
             title = _("Invalid File Type")
-            errors.append({"type": "ERROR", "message": _("File type not permitted"), "title": title})
+            errors.append(
+                {
+                    "type": "ERROR",
+                    "message": _("File type not permitted"),
+                    "title": title,
+                }
+            )
 
         if node:
             self.node_lookup[str(node.pk)] = node
@@ -1525,12 +1633,17 @@ class FileListDataType(BaseDataType):
             images_only = config.get("imagesOnly", False)
             if images_only and request:
                 for metadata in value:
-                    if not any(localizedString["value"] for localizedString in metadata.get("altText", {}).values()):
+                    if not any(
+                        localizedString["value"]
+                        for localizedString in metadata.get("altText", {}).values()
+                    ):
                         errors.append(
                             {
                                 "type": "ERROR",
                                 "title": _("Missing alt text"),
-                                "message": _("The image '{0}' is missing an alternative text.").format(metadata["name"]),
+                                "message": _(
+                                    "The image '{0}' is missing an alternative text."
+                                ).format(metadata["name"]),
                             }
                         )
                 files = request.FILES.getlist(f"file-list_{node.nodeid}", [])
@@ -1538,10 +1651,24 @@ class FileListDataType(BaseDataType):
                     width, height = get_image_dimensions(file.file)
                     if not width or not height:
                         title = _("Invalid File Type")
-                        errors.append({"type": "ERROR", "message": _("This node allows only images."), "title": title})
+                        errors.append(
+                            {
+                                "type": "ERROR",
+                                "message": _("This node allows only images."),
+                                "title": title,
+                            }
+                        )
 
-            if value is not None and config["activateMax"] is True and len(value) > limit:
-                message = _("This node has a limit of {0} files. Please reduce files.".format(limit))
+            if (
+                value is not None
+                and config["activateMax"] is True
+                and len(value) > limit
+            ):
+                message = _(
+                    "This node has a limit of {0} files. Please reduce files.".format(
+                        limit
+                    )
+                )
                 title = _("Exceed Maximun Number of Files")
                 errors.append({"type": "ERROR", "message": message, "title": title})
 
@@ -1555,13 +1682,21 @@ class FileListDataType(BaseDataType):
                             )
                         )
                         title = _("Exceed File Size Limit")
-                        errors.append({"type": "ERROR", "message": message, "title": title})
+                        errors.append(
+                            {"type": "ERROR", "message": message, "title": title}
+                        )
             if path:
                 for file in value:
                     if not default_storage.exists(os.path.join(path, file["name"])):
-                        message = _('The file "{0}" does not exist in "{1}"'.format(file["name"], path))
+                        message = _(
+                            'The file "{0}" does not exist in "{1}"'.format(
+                                file["name"], path
+                            )
+                        )
                         title = _("File Not Found")
-                        errors.append({"type": "ERROR", "message": message, "title": title})
+                        errors.append(
+                            {"type": "ERROR", "message": message, "title": title}
+                        )
         except Exception as e:
             dt = self.datatype_model.datatype
             message = _("datatype: {0}, value: {1} - {2} .".format(dt, value, e))
@@ -1577,12 +1712,20 @@ class FileListDataType(BaseDataType):
     def append_to_document(self, document, nodevalue, nodeid, tile, provisional=False):
         try:
             for f in tile.data[str(nodeid)]:
-                val = {"string": f["name"], "nodegroup_id": tile.nodegroup_id, "provisional": provisional}
+                val = {
+                    "string": f["name"],
+                    "nodegroup_id": tile.nodegroup_id,
+                    "provisional": provisional,
+                }
                 document["strings"].append(val)
         except (KeyError, TypeError) as e:
             for k, pe in tile.provisionaledits.items():
                 for f in pe["value"][nodeid]:
-                    val = {"string": f["name"], "nodegroup_id": tile.nodegroup_id, "provisional": provisional}
+                    val = {
+                        "string": f["name"],
+                        "nodegroup_id": tile.nodegroup_id,
+                        "provisional": provisional,
+                    }
                     document["strings"].append(val)
 
     def get_search_terms(self, nodevalue, nodeid):
@@ -1617,16 +1760,26 @@ class FileListDataType(BaseDataType):
             user_is_reviewer = user_is_resource_reviewer(request.user)
             current_tile_data = self.get_tile_data(tile)
             if previously_saved_tile.count() == 1:
-                previously_saved_tile_data = self.get_tile_data(previously_saved_tile[0])
-                if previously_saved_tile_data and previously_saved_tile_data[nodeid] is not None:
+                previously_saved_tile_data = self.get_tile_data(
+                    previously_saved_tile[0]
+                )
+                if (
+                    previously_saved_tile_data
+                    and previously_saved_tile_data[nodeid] is not None
+                ):
                     for previously_saved_file in previously_saved_tile_data[nodeid]:
                         previously_saved_file_has_been_removed = True
                         for incoming_file in current_tile_data[nodeid]:
-                            if previously_saved_file["file_id"] == incoming_file["file_id"]:
+                            if (
+                                previously_saved_file["file_id"]
+                                == incoming_file["file_id"]
+                            ):
                                 previously_saved_file_has_been_removed = False
                         if previously_saved_file_has_been_removed:
                             try:
-                                deleted_file = models.File.objects.get(pk=previously_saved_file["file_id"])
+                                deleted_file = models.File.objects.get(
+                                    pk=previously_saved_file["file_id"]
+                                )
                                 deleted_file.delete()
                             except models.File.DoesNotExist:
                                 logger.exception(_("File does not exist"))
