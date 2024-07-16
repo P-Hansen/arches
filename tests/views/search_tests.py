@@ -40,6 +40,7 @@ from guardian.shortcuts import assign_perm
 from arches.app.search.search_engine_factory import SearchEngineFactory
 from arches.app.search.elasticsearch_dsl_builder import Query, Term
 from arches.app.search.mappings import TERMS_INDEX, CONCEPTS_INDEX, RESOURCES_INDEX
+from arches.app.search.elasticsearch_dsl_builder import Bool, Match, Nested
 
 # these tests can be run from the command line via
 # python manage.py test tests/views/search_tests.py --pattern="*.py" --settings="tests.test_settings"
@@ -493,6 +494,22 @@ class SearchTests(ArchesTestCase):
         self.assertEqual(response_json["results"]["hits"]["total"]["value"], 2)
         self.assertCountEqual(extract_pks(response_json), [str(self.date_resource.pk), str(self.date_and_cultural_period_resource.pk)])
 
+    def test_custom_resource_index(self):
+        for x in range(0, 5):
+            term_filter = [
+                {
+                    "type": "term",
+                    "context": "",
+                    "context_label": "",
+                    "id": "",
+                    "text": "",
+                    "value": "business-specific search value %s" % x,
+                    "inverted": False,
+                }
+            ]
+            response_json = get_response_json(self.client, term_filter=term_filter)
+            self.assertEqual(response_json["results"]["hits"]["total"]["value"], 4 - x)
+
 
 def extract_pks(response_json):
     return [result["_source"]["resourceinstanceid"] for result in response_json["results"]["hits"]["hits"]]
@@ -513,3 +530,70 @@ def get_response_json(client, temporal_filter=None, term_filter=None, spatial_fi
     response = client.get("/search/resources", query)
     response_json = json.loads(response.content)
     return response_json
+
+
+class CustomResourceSearchValue:
+    # This is the ES document key that the custom document is added under
+    custom_search_path = "custom_values"
+
+    counter = 1
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def add_search_terms(resourceinstance, document, terms):
+        if CustomResourceSearchValue.custom_search_path not in document:
+            document[CustomResourceSearchValue.custom_search_path] = []
+
+        for x in range(0, CustomResourceSearchValue.counter):
+            document[CustomResourceSearchValue.custom_search_path].append(
+                {"custom_value": "business-specific search value %s" % x}
+            )
+        CustomResourceSearchValue.counter = CustomResourceSearchValue.counter + 1
+
+    @staticmethod
+    def add_search_filter(search_query, term):
+
+        # Move the "must" part of the query to "should" so the custom document can be searched on as well
+        search_query.dsl["bool"]["should"] = search_query.dsl["bool"]["must"]
+        search_query.dsl["bool"]["must"] = []
+        search_query.dsl["bool"]["minimum_should_match"] = 1
+
+        document_key = CustomResourceSearchValue.custom_search_path
+        custom_filter = Bool()
+        custom_filter.should(
+            Match(
+                field="%s.custom_value" % document_key,
+                query=term["value"],
+                type="phrase_prefix",
+            )
+        )
+        custom_filter.should(
+            Match(
+                field="%s.custom_value.folded" % document_key,
+                query=term["value"],
+                type="phrase_prefix",
+            )
+        )
+        nested_custom_filter = Nested(path=document_key, query=custom_filter)
+        # return nested_custom_filter
+        if term["inverted"]:
+            search_query.must_not(nested_custom_filter)
+        else:
+            search_query.should(nested_custom_filter)
+
+    @staticmethod
+    def get_custom_search_config():
+        return {
+            "type": "nested",
+            "properties": {
+                "custom_value": {
+                    "type": "text",
+                    "fields": {
+                        "raw": {"type": "keyword", "ignore_above": 256},
+                        "folded": {"type": "text", "analyzer": "folding"},
+                    },
+                }
+            },
+        }
