@@ -1036,7 +1036,7 @@ class GeojsonFeatureCollectionDataType(BaseDataType):
             )
             smaller_chunks = [
                 {
-                    "id": feature["id"],
+                    "id": feature["id"] if "id" in feature else uuid.uuid4(),
                     "type": "Feature",
                     "geometry": json.loads(item[0]),
                 }
