@@ -607,7 +607,7 @@ class Command(BaseCommand):
 
         @transaction.atomic
         def load_sql(package_dir, sql_dir):
-            sql_files = glob.glob(os.path.join(package_dir, sql_dir, "*.sql"))
+            sql_files = sorted(glob.glob(os.path.join(package_dir, sql_dir, "*.sql")))
             try:
                 with connection.cursor() as cursor:
                     for sql_file in sql_files:
@@ -619,7 +619,7 @@ class Command(BaseCommand):
                 print("Failed to load sql files")
 
         def load_resource_views(package_dir):
-            resource_views = glob.glob(os.path.join(package_dir, "business_data", "resource_views", "*.sql"))
+            resource_views = sorted(glob.glob(os.path.join(package_dir, "business_data", "resource_views", "*.sql")))
             try:
                 with connection.cursor() as cursor:
                     for view in resource_views:
