@@ -8,7 +8,7 @@ define([
     'geojson-extent',
     'geojsonhint',
     'togeojson',
-    'shpjs',
+    'shpjsesm',
     'proj4',
     'views/components/map',
     'views/components/cards/select-feature-layers',

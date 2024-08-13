@@ -139,7 +139,6 @@
         "numeral": "node_modules/numeral/numeral",
         "togeojson": "node_modules/@tmcw/togeojson/dist/togeojson.es",
         "shpjsesm": "node_modules/shpjs/dist/shp.esm",
-        "shpjs": "node_modules/shpjs/dist/shp",
         "cytoscape": "node_modules/cytoscape/dist/cytoscape.min",
         "cytoscape-cola": "node_modules/cytoscape-cola/cytoscape-cola",
         "webcola": "node_modules/webcola/WebCola/cola.min"
