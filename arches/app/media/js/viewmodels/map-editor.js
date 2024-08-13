@@ -8,18 +8,19 @@ define([
     'geojson-extent',
     'geojsonhint',
     'togeojson',
+    'shpjs',
     'proj4',
     'views/components/map',
     'views/components/cards/select-feature-layers',
     'views/components/datatypes/geojson-feature-collection',
-], function($, _, ko, koMapping, arches, uuid, geojsonExtent, geojsonhint, toGeoJSON, proj4, MapComponentViewModel, selectFeatureLayersFactory) {
+], function($, _, ko, koMapping, arches, uuid, geojsonExtent, geojsonhint, toGeoJSON, shpjs, proj4, MapComponentViewModel, selectFeatureLayersFactory) {
     var viewModel = function(params) {
-         
+
 
         var self = this;
         var padding = 40;
         var drawFeatures;
-        
+
         var resourceId = params.tile ? params.tile.resourceinstance_id : '';
         if (this.widgets === undefined) { // could be [], so checking specifically for undefined
             this.widgets = params.widgets || [];
@@ -620,7 +621,7 @@ define([
             var promises = [];
             for (var i = 0; i < files.length; i++) {
                 var extension = files[i].name.split('.').pop();
-                if (!['kml', 'json', 'geojson'].includes(extension)) {
+                if (!['kml', 'json', 'geojson','shp','zip'].includes(extension)) {
                     errors.push({
                         message: 'File unsupported: "' + files[i].name + '"'
                     });
@@ -629,18 +630,35 @@ define([
                         var file = files[i];
                         var extension = file.name.split('.').pop();
                         var reader = new window.FileReader();
-                        reader.onload = function(e) {
+                        reader.onload = function (e) {
                             var geoJSON;
                             if (['json', 'geojson'].includes(extension))
                                 geoJSON = JSON.parse(e.target.result);
-                            else
+                            else if (extension === 'kml')
                                 geoJSON = toGeoJSON.kml(
                                     new window.DOMParser()
                                         .parseFromString(e.target.result, "text/xml")
                                 );
-                            resolve(geoJSON);
+                            else if (extension === 'shp')
+                                geoJSON = {"type": "FeatureCollection", "features":
+                                    shpjs.parseShp(e.target.result).reduce(function(features, geometry) {
+                                        features = features.concat({"type": "Feature", "geometry": geometry, "properties": {}});
+                                        return features;
+                                    }, [])}
+
+                            else if (extension === 'zip')
+                                 shpjs.parseZip(e.target.result).then(function(parsedZip) {
+                                     resolve(parsedZip);
+                                 });
+                            if (extension !== 'zip')
+                                resolve(geoJSON);
                         };
-                        reader.readAsText(file);
+                        if (["shp", "zip"].includes(extension)) {
+                            reader.readAsArrayBuffer(file);
+                        } else
+                        {
+                            reader.readAsText(file);
+                        }
                     }));
                 }
             }

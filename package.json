@@ -73,6 +73,7 @@
         "requirejs-text": "~2.0.16",
         "select2": "3.5.1",
         "select-woo": "jadu/selectWoo",
+        "shpjs": "^6.1.0",
         "underscore": "~1.13.6",
         "uuidjs": "^3.3.0",
         "vue": "^3.3.4",
@@ -137,6 +138,7 @@
         "dom-4": "node_modules/dom4/build/dom4",
         "numeral": "node_modules/numeral/numeral",
         "togeojson": "node_modules/@tmcw/togeojson/dist/togeojson.es",
+        "shpjs": "node_modules/shpjs/dist/shp.esm",
         "cytoscape": "node_modules/cytoscape/dist/cytoscape.min",
         "cytoscape-cola": "node_modules/cytoscape-cola/cytoscape-cola",
         "webcola": "node_modules/webcola/WebCola/cola.min"
