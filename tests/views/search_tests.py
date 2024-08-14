@@ -38,9 +38,8 @@ from arches.app.utils.data_management.resource_graphs.importer import import_gra
 from arches.app.utils.betterJSONSerializer import JSONSerializer, JSONDeserializer
 from guardian.shortcuts import assign_perm
 from arches.app.search.search_engine_factory import SearchEngineFactory
-from arches.app.search.elasticsearch_dsl_builder import Query, Term
+from arches.app.search.elasticsearch_dsl_builder import Query, Bool, Match, Nested
 from arches.app.search.mappings import TERMS_INDEX, CONCEPTS_INDEX, RESOURCES_INDEX
-from arches.app.search.elasticsearch_dsl_builder import Bool, Match, Nested
 from arches.app.search.custom_resource_search import CustomResourceSearchValue
 
 # these tests can be run from the command line via
@@ -496,20 +495,61 @@ class SearchTests(ArchesTestCase):
         self.assertCountEqual(extract_pks(response_json), [str(self.date_resource.pk), str(self.date_and_cultural_period_resource.pk)])
 
     def test_custom_resource_index(self):
-        for x in range(0, 5):
+        for hit in get_response_json(self.client)["results"]["hits"]["hits"]:
             term_filter = [
                 {
                     "type": "term",
                     "context": "",
                     "context_label": "",
-                    "id": "",
-                    "text": "",
-                    "value": "business-specific search value %s" % x,
+                    "id": "business-specific-search-value-%s" % hit["_id"][:6],
+                    "text": "business-specific-search-value-%s" % hit["_id"][:6],
+                    "value": "business-specific-search-value-%s" % hit["_id"][:6],
                     "inverted": False,
                 }
             ]
             response_json = get_response_json(self.client, term_filter=term_filter)
-            self.assertEqual(response_json["results"]["hits"]["total"]["value"], 4 - x)
+            self.assertEqual(response_json["results"]["hits"]["total"]["value"], 1)
+            term_filter = [
+                {
+                    "type": "term",
+                    "context": "",
+                    "context_label": "",
+                    "id": "business-specific-search-value-%s" % hit["_id"][:6],
+                    "text": "business-specific-search-value-%s" % hit["_id"][:6],
+                    "value": "business-specific-search-value-%s" % hit["_id"][:6],
+                    "inverted": True,
+                }
+            ]
+            response_json = get_response_json(self.client, term_filter=term_filter)
+            self.assertEqual(response_json["results"]["hits"]["total"]["value"], 3)
+
+        term_filter = [
+            {
+                "type": "term",
+                "context": "",
+                "context_label": "",
+                "id": "business-specific-search-value-",
+                "text": "business-specific-search-value-",
+                "value": "business-specific-search-value-",
+                "inverted": False,
+            }
+        ]
+        response_json = get_response_json(self.client, term_filter=term_filter)
+        self.assertEqual(response_json["results"]["hits"]["total"]["value"], 4)
+
+        term_filter = [
+            {
+                "type": "term",
+                "context": "",
+                "context_label": "",
+                "id": "business-specific-search-value-",
+                "text": "business-specific-search-value-",
+                "value": "business-specific-search-value-",
+                "inverted": True,
+            }
+        ]
+        response_json = get_response_json(self.client, term_filter=term_filter)
+        self.assertEqual(response_json["results"]["hits"]["total"]["value"], 0)
 
 
 def extract_pks(response_json):
@@ -544,21 +584,20 @@ class TestCustomResourceSearchValue(CustomResourceSearchValue):
     def add_search_terms(resourceinstance, document, terms):
         if CustomResourceSearchValue.get_custom_search_path() not in document:
             document[CustomResourceSearchValue.get_custom_search_path()] = []
-
-        print("\n\nRound %s" % TestCustomResourceSearchValue.counter)
-        for x in range(0, TestCustomResourceSearchValue.counter):
-            print("\tAdding business-specific-search-value-%s" % x)
-            document[CustomResourceSearchValue.get_custom_search_path()].append(
-                {"custom_value": "business-specific-search-value-%s" % x}
-            )
-        print(document)
-        TestCustomResourceSearchValue.counter = TestCustomResourceSearchValue.counter + 1
+        document[CustomResourceSearchValue.get_custom_search_path()].append(
+            {
+                "custom_value": "business-specific-search-value-%s"
+                % str(resourceinstance.resourceinstanceid)[:6]
+            }
+        )
+        TestCustomResourceSearchValue.counter = (
+            TestCustomResourceSearchValue.counter + 1
+        )
 
     @staticmethod
     def create_nested_custom_filter(term, original_element):
         if "nested" not in original_element:
             return original_element
-        # print("Original element: %s" % original_element)
         document_key = CustomResourceSearchValue.get_custom_search_path()
         custom_filter = Bool()
         custom_filter.should(
@@ -584,7 +623,6 @@ class TestCustomResourceSearchValue(CustomResourceSearchValue):
 
     @staticmethod
     def add_search_filter(search_query, term):
-        # print("Search query before: %s" % search_query)
         original_must_filter = search_query.dsl["bool"]["must"]
         search_query.dsl["bool"]["must"] = []
         for must_element in original_must_filter:
@@ -602,4 +640,3 @@ class TestCustomResourceSearchValue(CustomResourceSearchValue):
                     term, must_element
                 )
             )
-        # print("Search query after: %s" % search_query)
