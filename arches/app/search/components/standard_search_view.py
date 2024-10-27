@@ -122,6 +122,7 @@ logger = logging.getLogger(__name__)
 class StandardSearchView(BaseSearchView):
 
     def append_dsl(self, search_query_object, **kwargs):
+        search_request_object = kwargs.get("search_request_object", self.request.GET)
         search_query_object["query"].include("graph_id")
         search_query_object["query"].include("root_ontology_class")
         search_query_object["query"].include("resourceinstanceid")
@@ -132,15 +133,16 @@ class StandardSearchView(BaseSearchView):
         search_query_object["query"].include("map_popup")
         search_query_object["query"].include("provisional_resource")
         search_query_object["query"].include("permissions")
-        load_tiles = get_str_kwarg_as_bool("tiles", self.request.GET)
+        load_tiles = get_str_kwarg_as_bool("tiles", search_request_object)
         if load_tiles:
             search_query_object["query"].include("tiles")
 
     def execute_query(self, search_query_object, response_object, **kwargs):
-        for_export = get_str_kwarg_as_bool("export", self.request.GET)
-        pages = self.request.GET.get("pages", None)
-        total = int(self.request.GET.get("total", "0"))
-        resourceinstanceid = self.request.GET.get("id", None)
+        search_request_object = kwargs.get("search_request_object", self.request.GET)
+        for_export = get_str_kwarg_as_bool("export", search_request_object)
+        pages = search_request_object.get("pages", None)
+        total = int(search_request_object.get("total", "0"))
+        resourceinstanceid = search_request_object.get("id", None)
         dsl = search_query_object["query"]
         if for_export or pages:
             results = dsl.search(index=RESOURCES_INDEX, scroll="1m")
@@ -220,6 +222,7 @@ class StandardSearchView(BaseSearchView):
                         permitted_nodegroups=permitted_nodegroups,
                         include_provisional=include_provisional,
                         querystring=querystring,
+                        search_request_object=sorted_query_obj,
                     )
             append_instance_permission_filter_dsl(self.request, search_query_object)
         except Exception as err:
@@ -235,7 +238,11 @@ class StandardSearchView(BaseSearchView):
         for filter_type, querystring in list(sorted_query_obj.items()):
             search_filter = search_filter_factory.get_filter(filter_type)
             if search_filter:
-                search_filter.execute_query(search_query_object, response_object)
+                search_filter.execute_query(
+                    search_query_object,
+                    response_object,
+                    search_request_object=sorted_query_obj,
+                )
 
         if response_object["results"] is not None:
             # allow filters to modify the results
@@ -246,6 +253,7 @@ class StandardSearchView(BaseSearchView):
                         search_query_object,
                         response_object,
                         permitted_nodegroups=permitted_nodegroups,
+                        search_request_object=sorted_query_obj,
                     )
 
             search_query_object.pop("query")
