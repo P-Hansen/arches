@@ -23,6 +23,7 @@ class PagingFilter(BaseSearchFilter):
         page = (
             1
             if search_request_object.get(self.componentname) == ""
+            or isinstance(search_request_object.get(self.componentname), dict)
             else int(search_request_object.get(self.componentname, 1))
         )
 
@@ -47,6 +48,7 @@ class PagingFilter(BaseSearchFilter):
         page = (
             1
             if search_request_object.get(self.componentname) == ""
+            or isinstance(search_request_object.get(self.componentname), dict)
             else int(search_request_object.get(self.componentname, 1))
         )
 
