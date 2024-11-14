@@ -50,8 +50,9 @@ define([
         doQuery: function() {
             const queryObj = JSON.parse(this.queryString());
             if (self.updateRequest) { self.updateRequest.abort(); }
+            const requestMethod = JSON.stringify(queryObj).length > 1800 ? "POST" : "GET";
             self.updateRequest = $.ajax({
-                type: "GET",
+                type: requestMethod,
                 url: arches.urls.search_results,
                 data: queryObj,
                 context: this,
@@ -82,7 +83,8 @@ define([
                 },
                 complete: function(request, status) {
                     self.updateRequest = undefined;
-                    window.history.pushState({}, '', '?' + $.param(queryObj).split('+').join('%20'));
+                    if (requestMethod === "GET")
+                        window.history.pushState({}, '', '?' + $.param(queryObj).split('+').join('%20'));
                     this.sharedStateObject.loading(false);
                 }
             });
