@@ -217,7 +217,6 @@ class StandardSearchView(BaseSearchView):
                         permitted_nodegroups=permitted_nodegroups,
                         include_provisional=include_provisional,
                         querystring=querystring,
-                        search_request=self.search_request,
                     )
             append_instance_permission_filter_dsl(self.request, search_query_object)
         except Exception as err:
@@ -236,7 +235,6 @@ class StandardSearchView(BaseSearchView):
                 search_filter.execute_query(
                     search_query_object,
                     response_object,
-                    search_request=self.search_request,
                 )
 
         if response_object["results"] is not None:
@@ -248,7 +246,6 @@ class StandardSearchView(BaseSearchView):
                         search_query_object,
                         response_object,
                         permitted_nodegroups=permitted_nodegroups,
-                        search_request=self.search_request,
                     )
 
             search_query_object.pop("query")
