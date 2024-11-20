@@ -9,8 +9,11 @@ details = {}
 
 
 class BaseSearchFilter:
-    def __init__(self, request=None, user=None, componentname=None):
+    def __init__(
+        self, request=None, search_request=None, user=None, componentname=None
+    ):
         self.request = request
+        self.search_request = search_request
         self.user = user
         self.componentname = componentname
 
@@ -54,6 +57,13 @@ class SearchFilterFactory(object):
             for search_filter in SearchComponent.objects.all()
         }
         self.search_filters_instances = {}
+        request_object = (
+            self.request.GET if self.request.method == "GET" else self.request.POST
+        )
+        request_object = request_object.dict()
+        self.search_request = self.create_search_query_dict(
+            list(request_object.items())
+        )
 
     def get_filter(self, componentname):
         if componentname in self.search_filters:
@@ -71,7 +81,7 @@ class SearchFilterFactory(object):
                 )
                 if class_method:
                     filter_instance = class_method(
-                        self.request, self.user, componentname
+                        self.request, self.search_request, self.user, componentname
                     )
                 self.search_filters_instances[search_filter.componentname] = (
                     filter_instance
@@ -83,10 +93,8 @@ class SearchFilterFactory(object):
     def get_searchview_name(self):
         if not self.request:
             searchview_component_name = None
-        elif self.request.method == "POST":
-            searchview_component_name = self.request.POST.get("search-view", None)
         else:
-            searchview_component_name = self.request.GET.get("search-view", None)
+            searchview_component_name = self.search_request.get("search-view", None)
 
         if not searchview_component_name:
             # get default search_view component
