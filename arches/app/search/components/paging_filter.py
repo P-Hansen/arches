@@ -17,28 +17,28 @@ details = {
 
 class PagingFilter(BaseSearchFilter):
     def append_dsl(self, search_query_object, **kwargs):
-        search_request_object = kwargs.get("search_request_object", self.request.GET)
-        export = search_request_object.get("export", None)
-        mobile_download = search_request_object.get("mobiledownload", None)
+        search_request = kwargs.get("search_request")
+        export = search_request.get("export", None)
+        mobile_download = search_request.get("mobiledownload", None)
         page = (
             1
-            if search_request_object.get(self.componentname) == ""
-            or isinstance(search_request_object.get(self.componentname), dict)
-            else int(search_request_object.get(self.componentname, 1))
+            if search_request.get(self.componentname) == ""
+            or isinstance(search_request.get(self.componentname), dict)
+            else int(search_request.get(self.componentname, 1))
         )
 
         if export is not None:
             limit = settings.SEARCH_RESULT_LIMIT
         elif mobile_download is not None:
-            limit = search_request_object.get("resourcecount")
+            limit = search_request.get("resourcecount")
         else:
             limit = settings.SEARCH_ITEMS_PER_PAGE
-        limit = int(search_request_object.get("limit", limit))
+        limit = int(search_request.get("limit", limit))
         search_query_object["query"].start = limit * int(page - 1)
         search_query_object["query"].limit = limit
 
     def post_search_hook(self, search_query_object, response_object, **kwargs):
-        search_request_object = kwargs.get("search_request_object", self.request.GET)
+        search_request = kwargs.get("search_request")
         total = (
             response_object["results"]["hits"]["total"]["value"]
             if response_object["results"]["hits"]["total"]["value"]
@@ -47,9 +47,9 @@ class PagingFilter(BaseSearchFilter):
         )
         page = (
             1
-            if search_request_object.get(self.componentname) == ""
-            or isinstance(search_request_object.get(self.componentname), dict)
-            else int(search_request_object.get(self.componentname, 1))
+            if search_request.get(self.componentname) == ""
+            or isinstance(search_request.get(self.componentname), dict)
+            else int(search_request.get(self.componentname, 1))
         )
 
         paginator, pages = get_paginator(
