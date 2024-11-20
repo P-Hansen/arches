@@ -122,7 +122,6 @@ logger = logging.getLogger(__name__)
 class StandardSearchView(BaseSearchView):
 
     def append_dsl(self, search_query_object, **kwargs):
-        search_request_object = kwargs.get("search_request_object", self.request.GET)
         search_query_object["query"].include("graph_id")
         search_query_object["query"].include("root_ontology_class")
         search_query_object["query"].include("resourceinstanceid")
@@ -133,16 +132,15 @@ class StandardSearchView(BaseSearchView):
         search_query_object["query"].include("map_popup")
         search_query_object["query"].include("provisional_resource")
         search_query_object["query"].include("permissions")
-        load_tiles = get_str_kwarg_as_bool("tiles", search_request_object)
+        load_tiles = get_str_kwarg_as_bool("tiles", self.search_request)
         if load_tiles:
             search_query_object["query"].include("tiles")
 
     def execute_query(self, search_query_object, response_object, **kwargs):
-        search_request_object = kwargs.get("search_request_object", self.request.GET)
-        for_export = get_str_kwarg_as_bool("export", search_request_object)
-        pages = search_request_object.get("pages", None)
-        total = int(search_request_object.get("total", "0"))
-        resourceinstanceid = search_request_object.get("id", None)
+        for_export = get_str_kwarg_as_bool("export", self.search_request)
+        pages = self.search_request.get("pages", None)
+        total = int(self.search_request.get("total", "0"))
+        resourceinstanceid = self.search_request.get("id", None)
         dsl = search_query_object["query"]
         if for_export or pages:
             results = dsl.search(index=RESOURCES_INDEX, scroll="1m")
@@ -208,13 +206,10 @@ class StandardSearchView(BaseSearchView):
         se = SearchEngineFactory().create()
         search_query_object = {"query": Query(se)}
         response_object = {"results": None}
-        sorted_query_obj = search_filter_factory.create_search_query_dict(
-            list(self.request.GET.items()) + list(self.request.POST.items())
-        )
         permitted_nodegroups = get_permitted_nodegroups(self.request.user)
         include_provisional = get_provisional_type(self.request)
         try:
-            for filter_type, querystring in list(sorted_query_obj.items()):
+            for filter_type, querystring in list(self.search_request.items()):
                 search_filter = search_filter_factory.get_filter(filter_type)
                 if search_filter:
                     search_filter.append_dsl(
@@ -222,7 +217,7 @@ class StandardSearchView(BaseSearchView):
                         permitted_nodegroups=permitted_nodegroups,
                         include_provisional=include_provisional,
                         querystring=querystring,
-                        search_request_object=sorted_query_obj,
+                        search_request=self.search_request,
                     )
             append_instance_permission_filter_dsl(self.request, search_query_object)
         except Exception as err:
@@ -235,25 +230,25 @@ class StandardSearchView(BaseSearchView):
         if returnDsl:
             return response_object, search_query_object
 
-        for filter_type, querystring in list(sorted_query_obj.items()):
+        for filter_type, querystring in list(self.search_request.items()):
             search_filter = search_filter_factory.get_filter(filter_type)
             if search_filter:
                 search_filter.execute_query(
                     search_query_object,
                     response_object,
-                    search_request_object=sorted_query_obj,
+                    search_request=self.search_request,
                 )
 
         if response_object["results"] is not None:
             # allow filters to modify the results
-            for filter_type, querystring in list(sorted_query_obj.items()):
+            for filter_type, querystring in list(self.search_request.items()):
                 search_filter = search_filter_factory.get_filter(filter_type)
                 if search_filter:
                     search_filter.post_search_hook(
                         search_query_object,
                         response_object,
                         permitted_nodegroups=permitted_nodegroups,
-                        search_request_object=sorted_query_obj,
+                        search_request=self.search_request,
                     )
 
             search_query_object.pop("query")
