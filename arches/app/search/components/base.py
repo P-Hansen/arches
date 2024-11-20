@@ -60,8 +60,7 @@ class SearchFilterFactory(object):
         request_object = (
             self.request.GET if self.request.method == "GET" else self.request.POST
         )
-        request_object = request_object.dict()
-        self.search_request = request_object
+        self.search_request = request_object.dict()
 
     def get_filter(self, componentname):
         if componentname in self.search_filters:
