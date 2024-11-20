@@ -102,6 +102,7 @@ class BaseSearchView(BaseSearchFilter):
                 item.componentname, float("inf")
             ),
         )
+        self.search_request = self.create_query_dict(self.search_request)
 
     @property
     def required_search_filters(self):
