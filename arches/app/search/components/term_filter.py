@@ -34,8 +34,7 @@ class TermFilter(BaseSearchFilter):
         include_provisional = kwargs.get("include_provisional")
         search_query = Bool()
         querystring_params = kwargs.get("querystring", "[]")
-        search_request = kwargs.get("search_request")
-        language = search_request.get("language", "*")
+        language = self.search_request.get("language", "*")
         for term in JSONDeserializer().deserialize(querystring_params):
             if term["type"] == "term" or term["type"] == "string":
                 string_filter = Bool()
