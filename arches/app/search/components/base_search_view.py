@@ -48,8 +48,15 @@ class BaseSearchView(BaseSearchFilter):
     how to execute a search in the search_results method
     """
 
-    def __init__(self, request=None, user=None, componentname=None):
-        super().__init__(request=request, user=user, componentname=componentname)
+    def __init__(
+        self, request=None, search_request=None, user=None, componentname=None
+    ):
+        super().__init__(
+            request=request,
+            search_request=search_request,
+            user=user,
+            componentname=componentname,
+        )
         self.searchview_component = SearchComponent.objects.get(
             componentname=componentname
         )
@@ -95,6 +102,7 @@ class BaseSearchView(BaseSearchFilter):
                 item.componentname, float("inf")
             ),
         )
+        self.search_request = self.create_query_dict(self.search_request)
 
     @property
     def required_search_filters(self):
