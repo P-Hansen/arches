@@ -26,6 +26,7 @@ from arches.app.models.card import Card
 from arches.app.models.models import Node
 from arches.app.models.system_settings import settings
 from arches.app.utils.db_utils import dictfetchall
+import re
 
 
 class Command(BaseCommand):
@@ -200,7 +201,10 @@ def create_tile_excel_workbook(graphid, tiledata=None):
                 sheet.title = card_name
                 first_sheet = False
             else:
-                sheet = wb.create_sheet(title=card_name)
+                if re.match("/", card_name):
+                    print("Bad name: %s" % card_name)
+                sheet = wb.create_sheet(title=card_name.replace("/", "|"))
+                # sheet = wb.create_sheet(title=card_name)
             sheet[f"A1"] = "tileid"
             sheet[f"B1"] = "parenttile_id"
             sheet[f"C1"] = "resourceinstance_id"
