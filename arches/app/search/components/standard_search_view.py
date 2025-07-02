@@ -132,15 +132,15 @@ class StandardSearchView(BaseSearchView):
         search_query_object["query"].include("map_popup")
         search_query_object["query"].include("provisional_resource")
         search_query_object["query"].include("permissions")
-        load_tiles = get_str_kwarg_as_bool("tiles", self.request.GET)
+        load_tiles = get_str_kwarg_as_bool("tiles", self.search_request)
         if load_tiles:
             search_query_object["query"].include("tiles")
 
     def execute_query(self, search_query_object, response_object, **kwargs):
-        for_export = get_str_kwarg_as_bool("export", self.request.GET)
-        pages = self.request.GET.get("pages", None)
-        total = int(self.request.GET.get("total", "0"))
-        resourceinstanceid = self.request.GET.get("id", None)
+        for_export = get_str_kwarg_as_bool("export", self.search_request)
+        pages = self.search_request.get("pages", None)
+        total = int(self.search_request.get("total", "0"))
+        resourceinstanceid = self.search_request.get("id", None)
         dsl = search_query_object["query"]
         if for_export or pages:
             results = dsl.search(index=RESOURCES_INDEX, scroll="1m")
@@ -206,13 +206,10 @@ class StandardSearchView(BaseSearchView):
         se = SearchEngineFactory().create()
         search_query_object = {"query": Query(se)}
         response_object = {"results": None}
-        sorted_query_obj = search_filter_factory.create_search_query_dict(
-            list(self.request.GET.items()) + list(self.request.POST.items())
-        )
         permitted_nodegroups = get_permitted_nodegroups(self.request.user)
         include_provisional = get_provisional_type(self.request)
         try:
-            for filter_type, querystring in list(sorted_query_obj.items()):
+            for filter_type, querystring in list(self.search_request.items()):
                 search_filter = search_filter_factory.get_filter(filter_type)
                 if search_filter:
                     search_filter.append_dsl(
@@ -232,14 +229,17 @@ class StandardSearchView(BaseSearchView):
         if returnDsl:
             return response_object, search_query_object
 
-        for filter_type, querystring in list(sorted_query_obj.items()):
+        for filter_type, querystring in list(self.search_request.items()):
             search_filter = search_filter_factory.get_filter(filter_type)
             if search_filter:
-                search_filter.execute_query(search_query_object, response_object)
+                search_filter.execute_query(
+                    search_query_object,
+                    response_object,
+                )
 
         if response_object["results"] is not None:
             # allow filters to modify the results
-            for filter_type, querystring in list(sorted_query_obj.items()):
+            for filter_type, querystring in list(self.search_request.items()):
                 search_filter = search_filter_factory.get_filter(filter_type)
                 if search_filter:
                     search_filter.post_search_hook(
